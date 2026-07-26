@@ -5,3 +5,6 @@ arm-none-eabi-size  06\ BLDC_speed.elf
   42252	     92	   4388	  46732	   b68c	06 BLDC_speed.elf
 Finished building: default.size.stdout
  
+
+07:11:51 Build Finished. 0 errors, 0 warnings. (took 491ms)
+

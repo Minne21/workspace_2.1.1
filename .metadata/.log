@@ -271,3 +271,28 @@ COM3
 
 !ENTRY org.eclipse.equinox.p2.metadata.repository 4 1000 2026-07-25 19:40:43.327
 !MESSAGE No repository found at https://eclipse.org.
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 00:12:31.653
+!MESSAGE Executed PowerShell command powershell.exe -Command "Get-CimInstance -ClassName Win32_SerialPort | Select-Object -ExpandProperty DeviceID":
+
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 00:12:31.655
+!MESSAGE port: 
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 07:05:47.147
+!MESSAGE Executed PowerShell command powershell.exe -Command "Get-CimInstance -ClassName Win32_SerialPort | Select-Object -ExpandProperty DeviceID":
+COM3
+
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 07:05:47.148
+!MESSAGE port: COM3
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 07:06:13.466
+!MESSAGE Executed PowerShell command powershell.exe -Command "Get-CimInstance -ClassName Win32_SerialPort | Select-Object -ExpandProperty DeviceID":
+
+
+!ENTRY com.st.stm32cube.ide.mpu.remote.serial 1 1 2026-07-26 07:06:13.467
+!MESSAGE port: 
+
+!ENTRY org.eclipse.cdt.core 1 0 2026-07-26 07:09:46.129
+!MESSAGE Indexed '06 BLDC_speed' (31 sources, 170 headers) in 5.32 sec: 19,280 declarations; 99,752 references; 11 unresolved inclusions; 274 syntax errors; 1,870 unresolved names (1.5%)
