@@ -1,0 +1,10 @@
+19:40:51 **** Build of configuration Debug for project 02 Uart DMA ****
+make -j16 all 
+arm-none-eabi-size  02\ Uart\ DMA.elf 
+   text	   data	    bss	    dec	    hex	filename
+  21608	     92	   3564	  25264	   62b0	02 Uart DMA.elf
+Finished building: default.size.stdout
+ 
+
+19:40:53 Build Finished. 0 errors, 0 warnings. (took 1s.641ms)
+

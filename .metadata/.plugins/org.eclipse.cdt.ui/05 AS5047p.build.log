@@ -1,0 +1,10 @@
+19:42:29 **** Build of configuration Debug for project 05 AS5047p ****
+make -j16 all 
+arm-none-eabi-size  05\ AS5047p.elf 
+   text	   data	    bss	    dec	    hex	filename
+  42252	     92	   4388	  46732	   b68c	05 AS5047p.elf
+Finished building: default.size.stdout
+ 
+
+19:42:30 Build Finished. 0 errors, 0 warnings. (took 656ms)
+

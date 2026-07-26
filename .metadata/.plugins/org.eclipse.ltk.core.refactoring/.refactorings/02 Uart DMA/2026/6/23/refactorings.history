@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;02 Uart DMA/01 LED Blinking.ioc&apos; to &apos;02 Uart DMA.ioc&apos;" description="Rename resource &apos;01 LED Blinking.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="01 LED Blinking.ioc" name="02 Uart DMA.ioc" stamp="1780349574737" updateReferences="true"/>
+</session>

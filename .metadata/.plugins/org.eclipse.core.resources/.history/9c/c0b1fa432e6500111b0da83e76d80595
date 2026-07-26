@@ -1,0 +1,330 @@
+/*
+ * sensors.c
+ *
+ *  Created on: Nov 27, 2025
+ *      Author: Ray
+ */
+
+#include "main.h"
+#include <math.h>
+#include "stm32g4xx_hal.h"
+#include <stdint.h>
+
+//#include "as5600.h"
+//#include "foc.h"
+#include "sensor.h"
+
+
+// ADC
+#define ADC_MAX 	4095.0f     // 12-bit ADC
+#define VREF        3.3f
+
+// NTC
+#define R_FIXED     4700.0f     // 4.7k resistor
+#define R0          10000.0f    // NTC 10k at 25°C
+#define BETA        3435.0f
+#define T0          298.15f     // 25°C in Kelvin
+
+// Input voltage
+#define R_TOP       169000.0f  // R68 = 169k
+#define R_BOTTOM    18000.0f   // R76 = 18k
+#define VBUS_SCALE  ((R_TOP + R_BOTTOM) / R_BOTTOM)   // ~9.886
+
+#define K_CURRENT 	20.833f		// K_CURRENT 20.833f, GAIN_POS 16, R_SHUNT 3m
+								// K_CURRENT 10.417f, GAIN_POS 32, R_SHUNT 3m
+								// K_CURRENT 5.208f, GAIN_POS 64, R_SHUNT 3m
+
+
+/************************************************/
+
+extern TIM_HandleTypeDef htim4;
+extern AS5047_Enc_t motor_enc;
+
+void AS5047_Enc_Init(AS5047_Enc_t *enc) {
+    enc->index_found = 0;
+    enc->total_count = 0;
+    enc->mech_rad = 0.0f;
+
+    HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
+    enc->last_cnt = __HAL_TIM_GET_COUNTER(&htim4);
+}
+
+// PB8 EXTI 인터럽트 발생 시 main.c에서 호출할 함수
+void AS5047_Enc_Index_Callback(AS5047_Enc_t *enc) {
+    // 처음 Index를 만났을 때 타이머를 0으로 리셋하여 물리적 영점 정렬
+    if (enc->index_found == 0) {
+        __HAL_TIM_SET_COUNTER(&htim4, 0);
+        enc->last_cnt = 0;
+        enc->index_found = 1;
+    }
+}
+
+void AS5047_Enc_Update(AS5047_Enc_t *enc) {
+    enc->cnt = (int32_t)__HAL_TIM_GET_COUNTER(&htim4);
+
+    // 1. 변화량 계산 (16비트 오버플로우 방지)
+    int16_t diff = (int16_t)(enc->cnt - enc->last_cnt);
+    enc->total_count += diff;
+
+    // 2. 기계적 라디안 계산 (0 ~ 2*PI)
+    float temp_rad = (float)(enc->cnt % (int)ENCODER_RES) * (2.0f * 3.14159265f / ENCODER_RES);
+    if (temp_rad < 0) temp_rad += (2.0f * 3.14159265f);
+    enc->mech_rad = temp_rad;
+
+    // 3. 전기적 라디안 계산 (fmodf 제거 버전)
+    // 단순히 극쌍수를 곱한 뒤, 2*PI 범위를 벗어날 경우 뺄셈/덧셈으로 처리합니다.
+    enc->elec_rad = enc->mech_rad * POLE_PAIRS;
+
+    // while문을 사용하여 2*PI 범위를 강제로 맞춤 (보통 1~2번의 루프로 끝남)
+    while (enc->elec_rad < 0.0f) enc->elec_rad += 6.2831853f;
+    while (enc->elec_rad >= 6.2831853f) enc->elec_rad -= 6.2831853f;
+
+     // 4. 속도 계산 (RPM)
+    enc->velocity_rpm = ((float)diff / ENCODER_RES) * (60.0f / SAMPLING_TIME_S);
+
+    enc->last_cnt = enc->cnt;
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == GPIO_PIN_8) { // PB8 Index 신호
+        AS5047_Enc_Index_Callback(&motor_enc);
+    }
+}
+
+
+/****************************************/
+
+
+uint16_t ADC1_VAL[5];		// [0] Vbus, [1] TempC, [2] PhaseU_A, [3] Potentiometer
+uint16_t ADC2_VAL[3];		// [0] PhaseV_A, [1] PhaseW_A
+
+float offset_phaseA = 0.0f;
+float offset_phaseB = 0.0f;
+float offset_phaseC = 0.0f;
+
+float tempC, Vbus;
+float PhaseU_A, PhaseV_A, PhaseW_A;
+
+// for interrupt
+volatile int isADCFinished = 0;
+
+// ADC IT for motor current sense, and votlage/temperature monitoring
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) __attribute__((section (".ccmram")));
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+	// Remove the Up/Down counting check.
+	// If TRGO is set to Update Event, this ISR only fires at the bottom of PWM.
+
+    if(hadc == &hadc1)
+    {
+        // 1. Compute Phase A Current
+        // Using a single linear gain K_CURRENT. Standard B-G431-ESC1 gain is ~20.83
+        PhaseU_A = ((float)ADC1_VAL[2] - offset_phaseA) * (VREF / 4096.0f) * K_CURRENT;
+
+        // 2. Housekeeping (Lower priority). Timer4 period is getting longer due to Vbus and TempC. it should be converted to isADCFinished.
+        NTC_GetTemperature();
+        Get_VBUS_Voltage();
+
+#ifdef movetoFOC
+        if (isADCFinished)
+        {
+            isADCFinished = 0;
+            NTC_GetTemperature();
+            Get_VBUS_Voltage();
+        }
+#endif
+    }
+
+    if (hadc == &hadc2)
+    {
+        // 3. Compute Phase B and C
+        PhaseV_A = ((float)ADC2_VAL[0] - offset_phaseB) * (VREF / 4096.0f) * K_CURRENT;
+        PhaseW_A = ((float)ADC2_VAL[1] - offset_phaseC) * (VREF / 4096.0f) * K_CURRENT;
+    }
+
+	isADCFinished = 1;
+
+#if 0
+	if(hadc == &hadc1)
+	{
+		if (__HAL_TIM_IS_TIM_COUNTING_DOWN(&htim1))
+		{
+			/* compute NTC temperature in Celsius */
+			NTC_GetTemperature();
+
+			/* compute input voltage */
+			Get_VBUS_Voltage();
+
+		/* compute the phase A current */
+		    // --- Phase A ---
+		    float adcA   = (float)ADC1_VAL[2];
+		    float vadcA  = adcA * (VREF / ADC_MAX);
+		    float voffA  = offset_phaseA * (VREF / ADC_MAX);
+
+		    // Determine polarity
+		    float gainA = (vadcA >= voffA) ? K_POS : K_NEG;
+
+		    PhaseU_A = (vadcA - voffA) * gainA ;
+		}
+		else
+		{
+		    // ADC sampling during UP-count -> measure offset
+		    offset_phaseA = ALPHA_OFFSET * ADC1_VAL[2] + (1.0f - ALPHA_OFFSET) * offset_phaseA;
+
+		    return;
+		}
+	}
+
+	if (hadc == &hadc2)
+	{
+		if (__HAL_TIM_IS_TIM_COUNTING_DOWN(&htim1))
+		{
+		    // --- Phase B ---
+		    float adcB   = (float)ADC2_VAL[0];
+		    float vadcB  = adcB * (VREF / ADC_MAX);
+		    float voffB  = offset_phaseB * (VREF / ADC_MAX);
+
+		    float gainB = (vadcB >= voffB) ? K_POS : K_NEG;
+
+		    PhaseV_A = (vadcB - voffB) * gainB ;
+
+		    // --- Phase C ---
+		    float adcC   = (float)ADC2_VAL[1];
+		    float vadcC  = adcC * (VREF / ADC_MAX);
+		    float voffC  = offset_phaseC * (VREF / ADC_MAX);
+
+		    float gainC = (vadcC >= voffC) ? K_POS : K_NEG;
+
+		    PhaseW_A = (vadcC - voffC) * gainC ;
+		}
+		else
+		{
+		    // ADC sampling during UP-count -> measure offset
+		    offset_phaseB = ALPHA_OFFSET * ADC2_VAL[0] + (1.0f - ALPHA_OFFSET) * offset_phaseB;
+		    offset_phaseC = ALPHA_OFFSET * ADC2_VAL[1] + (1.0f - ALPHA_OFFSET) * offset_phaseC;
+
+		}
+	}
+#endif
+
+
+#if reg
+	// hardware error clears torque enable register and disable FOC torque controller
+	if( regs[REG_HARDWARE_ERROR_STATUS] != 0 )
+	{
+		// disable motor control
+//		UART_DMA_Printf("%d \r\n", regs[REG_HARDWARE_ERROR_STATUS]);
+	}
+	else
+	{
+		API_FOC_Torque_Update();
+//		UART_DMA_Printf("ADC \r\n");
+	}
+#endif
+
+}
+
+void Calibrate_All_Offsets(void)
+{
+    uint32_t sumA = 0, sumB = 0, sumC = 0;
+    int samples = 1000;
+
+    for(int i = 0; i < samples; i++) {
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_Start(&hadc2);
+        HAL_ADC_PollForConversion(&hadc1, 10);
+        sumA += ADC1_VAL[2];
+        sumB += ADC2_VAL[0];
+        sumC += ADC2_VAL[1];
+    }
+    // Set global offsets as raw ADC counts (usually around 2048)
+    offset_phaseA = (float)sumA / samples;
+    offset_phaseB = (float)sumB / samples;
+    offset_phaseC = (float)sumC / samples;
+}
+
+
+
+// compute temperature in Celsius
+float NTC_GetTemperature(void)
+{
+	// Convert ADC to voltage
+    float V_NTC = (ADC1_VAL[1] / ADC_MAX) * VREF;
+
+    // Compute NTC resistance from divider equation
+    float R_NTC = (VREF / V_NTC - 1.0f) * R_FIXED;
+
+    // Temperature (Kelvin) using Beta equation
+    float tempK = 1.0f / ( (1.0f / T0) + (1.0f / BETA) * logf(R_NTC / R0) );
+//    float tempK = BETA * T0 / ( BETA - T0*logf(R0/r_ntc) );		//B-G431B-ESC1-v3
+
+    // Convert to Celsius
+    tempC = tempK - 273.15f;
+
+#if reg
+    // apply thermal protection and update hardware error register
+	float const max_temperature_C = regs[REG_TEMPERATURE_LIMIT];
+	if(NTC_tempC > max_temperature_C)
+	{
+		// set overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_OVERHEATING;
+		//HAL_Serial_Print(&serial,"h");
+	}
+	else if( ((regs[REG_HARDWARE_ERROR_STATUS]&(1UL << HW_ERROR_BIT_OVERHEATING))!=0) ) // hard-coded hysteresis 12°C
+	{
+		if(NTC_tempC < max_temperature_C-12.0f)
+			// clear overheating error
+			regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+		// wait for cooling
+	}
+	else
+	{
+		// clear overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+	}
+#endif
+
+    return tempC;
+}
+
+// compute input voltage
+float Get_VBUS_Voltage(void)
+{
+    uint16_t adc = ADC1_VAL[0];
+
+    // Convert ADC to voltage on VBUS_SENS pin
+    float v_adc = (adc / ADC_MAX) * VREF;
+
+    // Convert to actual input voltage
+    Vbus = v_adc * VBUS_SCALE;
+
+#if reg
+	// apply voltage protection and update
+	float const min_voltage_V = regs[REG_LOW_VOLTAGE_LIMIT];
+	float const max_voltage_V = regs[REG_HIGH_VOLTAGE_LIMIT];
+	if((Input_V > max_voltage_V)||(Input_V < min_voltage_V))
+	{
+		// set voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_VOLTAGE;
+		//HAL_Serial_Print(&serial,"v");
+	}
+	else
+	{
+		// clear voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_VOLTAGE);
+	}
+#endif
+
+    return Vbus;
+}
+
+
+
+
+
+
+
+
+
+
