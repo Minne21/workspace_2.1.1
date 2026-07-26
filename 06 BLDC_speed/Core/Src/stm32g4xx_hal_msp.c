@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2026 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -26,9 +26,9 @@ extern DMA_HandleTypeDef hdma_adc1;
 
 extern DMA_HandleTypeDef hdma_adc2;
 
-extern DMA_HandleTypeDef hdma_usart2_rx;
-
 extern DMA_HandleTypeDef hdma_usart2_tx;
+
+extern DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
@@ -141,7 +141,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 
     /* ADC1 DMA Init */
     /* ADC1 Init */
-    hdma_adc1.Instance = DMA1_Channel3;
+    hdma_adc1.Instance = DMA1_Channel4;
     hdma_adc1.Init.Request = DMA_REQUEST_ADC1;
     hdma_adc1.Init.Direction = DMA_PERIPH_TO_MEMORY;
     hdma_adc1.Init.PeriphInc = DMA_PINC_DISABLE;
@@ -187,7 +187,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 
     /* ADC2 DMA Init */
     /* ADC2 Init */
-    hdma_adc2.Instance = DMA1_Channel4;
+    hdma_adc2.Instance = DMA1_Channel5;
     hdma_adc2.Init.Request = DMA_REQUEST_ADC2;
     hdma_adc2.Init.Direction = DMA_PERIPH_TO_MEMORY;
     hdma_adc2.Init.PeriphInc = DMA_PINC_DISABLE;
@@ -195,7 +195,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
     hdma_adc2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
     hdma_adc2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     hdma_adc2.Init.Mode = DMA_CIRCULAR;
-    hdma_adc2.Init.Priority = DMA_PRIORITY_LOW;
+    hdma_adc2.Init.Priority = DMA_PRIORITY_HIGH;
     if (HAL_DMA_Init(&hdma_adc2) != HAL_OK)
     {
       Error_Handler();
@@ -288,6 +288,51 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
 }
 
 /**
+  * @brief CORDIC MSP Initialization
+  * This function configures the hardware resources used in this example
+  * @param hcordic: CORDIC handle pointer
+  * @retval None
+  */
+void HAL_CORDIC_MspInit(CORDIC_HandleTypeDef* hcordic)
+{
+  if(hcordic->Instance==CORDIC)
+  {
+    /* USER CODE BEGIN CORDIC_MspInit 0 */
+
+    /* USER CODE END CORDIC_MspInit 0 */
+    /* Peripheral clock enable */
+    __HAL_RCC_CORDIC_CLK_ENABLE();
+    /* USER CODE BEGIN CORDIC_MspInit 1 */
+
+    /* USER CODE END CORDIC_MspInit 1 */
+
+  }
+
+}
+
+/**
+  * @brief CORDIC MSP De-Initialization
+  * This function freeze the hardware resources used in this example
+  * @param hcordic: CORDIC handle pointer
+  * @retval None
+  */
+void HAL_CORDIC_MspDeInit(CORDIC_HandleTypeDef* hcordic)
+{
+  if(hcordic->Instance==CORDIC)
+  {
+    /* USER CODE BEGIN CORDIC_MspDeInit 0 */
+
+    /* USER CODE END CORDIC_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_CORDIC_CLK_DISABLE();
+    /* USER CODE BEGIN CORDIC_MspDeInit 1 */
+
+    /* USER CODE END CORDIC_MspDeInit 1 */
+  }
+
+}
+
+/**
   * @brief OPAMP MSP Initialization
   * This function configures the hardware resources used in this example
   * @param hopamp: OPAMP handle pointer
@@ -304,10 +349,10 @@ void HAL_OPAMP_MspInit(OPAMP_HandleTypeDef* hopamp)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     /**OPAMP1 GPIO Configuration
-    PA1     ------> OPAMP1_VINP
     PA3     ------> OPAMP1_VINM0
+    PA7     ------> OPAMP1_VINP
     */
-    GPIO_InitStruct.Pin = M1_CURR_SHUNT_U__Pin|M1_CURR_SHUNT_U_A3_Pin;
+    GPIO_InitStruct.Pin = M1_OPAMP1_INT1_GAIN_Pin|GPIO_PIN_7;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -323,14 +368,20 @@ void HAL_OPAMP_MspInit(OPAMP_HandleTypeDef* hopamp)
     /* USER CODE END OPAMP2_MspInit 0 */
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     /**OPAMP2 GPIO Configuration
     PA5     ------> OPAMP2_VINM0
-    PA7     ------> OPAMP2_VINP
+    PB0     ------> OPAMP2_VINP
     */
-    GPIO_InitStruct.Pin = M1_CURR_SHUNT_V__Pin|M1_CURR_SHUNT_V_A7_Pin;
+    GPIO_InitStruct.Pin = M1_CURR_SHUNT_V_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_GPIO_Init(M1_CURR_SHUNT_V_GPIO_Port, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     /* USER CODE BEGIN OPAMP2_MspInit 1 */
 
@@ -344,10 +395,10 @@ void HAL_OPAMP_MspInit(OPAMP_HandleTypeDef* hopamp)
 
     __HAL_RCC_GPIOB_CLK_ENABLE();
     /**OPAMP3 GPIO Configuration
-    PB0     ------> OPAMP3_VINP
     PB2     ------> OPAMP3_VINM0
+    PB13     ------> OPAMP3_VINP
     */
-    GPIO_InitStruct.Pin = M1_CURR_SHUNT_W__Pin|M1_CURR_SHUNT_W_B2_Pin;
+    GPIO_InitStruct.Pin = M1_OPAMP3_INT_GAIN_Pin|M1_CURR_SHUNT_W_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -374,10 +425,10 @@ void HAL_OPAMP_MspDeInit(OPAMP_HandleTypeDef* hopamp)
     /* USER CODE END OPAMP1_MspDeInit 0 */
 
     /**OPAMP1 GPIO Configuration
-    PA1     ------> OPAMP1_VINP
     PA3     ------> OPAMP1_VINM0
+    PA7     ------> OPAMP1_VINP
     */
-    HAL_GPIO_DeInit(GPIOA, M1_CURR_SHUNT_U__Pin|M1_CURR_SHUNT_U_A3_Pin);
+    HAL_GPIO_DeInit(GPIOA, M1_OPAMP1_INT1_GAIN_Pin|GPIO_PIN_7);
 
     /* USER CODE BEGIN OPAMP1_MspDeInit 1 */
 
@@ -391,9 +442,11 @@ void HAL_OPAMP_MspDeInit(OPAMP_HandleTypeDef* hopamp)
 
     /**OPAMP2 GPIO Configuration
     PA5     ------> OPAMP2_VINM0
-    PA7     ------> OPAMP2_VINP
+    PB0     ------> OPAMP2_VINP
     */
-    HAL_GPIO_DeInit(GPIOA, M1_CURR_SHUNT_V__Pin|M1_CURR_SHUNT_V_A7_Pin);
+    HAL_GPIO_DeInit(M1_CURR_SHUNT_V_GPIO_Port, M1_CURR_SHUNT_V_Pin);
+
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_0);
 
     /* USER CODE BEGIN OPAMP2_MspDeInit 1 */
 
@@ -406,10 +459,10 @@ void HAL_OPAMP_MspDeInit(OPAMP_HandleTypeDef* hopamp)
     /* USER CODE END OPAMP3_MspDeInit 0 */
 
     /**OPAMP3 GPIO Configuration
-    PB0     ------> OPAMP3_VINP
     PB2     ------> OPAMP3_VINM0
+    PB13     ------> OPAMP3_VINP
     */
-    HAL_GPIO_DeInit(GPIOB, M1_CURR_SHUNT_W__Pin|M1_CURR_SHUNT_W_B2_Pin);
+    HAL_GPIO_DeInit(GPIOB, M1_OPAMP3_INT_GAIN_Pin|M1_CURR_SHUNT_W_Pin);
 
     /* USER CODE BEGIN OPAMP3_MspDeInit 1 */
 
@@ -434,6 +487,8 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     /* Peripheral clock enable */
     __HAL_RCC_TIM1_CLK_ENABLE();
     /* TIM1 interrupt Init */
+    HAL_NVIC_SetPriority(TIM1_BRK_TIM15_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM1_BRK_TIM15_IRQn);
     HAL_NVIC_SetPriority(TIM1_UP_TIM16_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
     /* USER CODE BEGIN TIM1_MspInit 1 */
@@ -548,6 +603,7 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     __HAL_RCC_TIM1_CLK_DISABLE();
 
     /* TIM1 interrupt DeInit */
+    HAL_NVIC_DisableIRQ(TIM1_BRK_TIM15_IRQn);
     HAL_NVIC_DisableIRQ(TIM1_UP_TIM16_IRQn);
     /* USER CODE BEGIN TIM1_MspDeInit 1 */
 
@@ -628,25 +684,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     /* USART2 DMA Init */
-    /* USART2_RX Init */
-    hdma_usart2_rx.Instance = DMA1_Channel1;
-    hdma_usart2_rx.Init.Request = DMA_REQUEST_USART2_RX;
-    hdma_usart2_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
-    hdma_usart2_rx.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_usart2_rx.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_usart2_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    hdma_usart2_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
-    hdma_usart2_rx.Init.Mode = DMA_CIRCULAR;
-    hdma_usart2_rx.Init.Priority = DMA_PRIORITY_LOW;
-    if (HAL_DMA_Init(&hdma_usart2_rx) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    __HAL_LINKDMA(huart,hdmarx,hdma_usart2_rx);
-
     /* USART2_TX Init */
-    hdma_usart2_tx.Instance = DMA1_Channel2;
+    hdma_usart2_tx.Instance = DMA1_Channel1;
     hdma_usart2_tx.Init.Request = DMA_REQUEST_USART2_TX;
     hdma_usart2_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
     hdma_usart2_tx.Init.PeriphInc = DMA_PINC_DISABLE;
@@ -661,6 +700,23 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     }
 
     __HAL_LINKDMA(huart,hdmatx,hdma_usart2_tx);
+
+    /* USART2_RX Init */
+    hdma_usart2_rx.Instance = DMA1_Channel2;
+    hdma_usart2_rx.Init.Request = DMA_REQUEST_USART2_RX;
+    hdma_usart2_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_usart2_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_usart2_rx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_usart2_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_usart2_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_usart2_rx.Init.Mode = DMA_CIRCULAR;
+    hdma_usart2_rx.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&hdma_usart2_rx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(huart,hdmarx,hdma_usart2_rx);
 
     /* USART2 interrupt Init */
     HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
@@ -696,8 +752,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
     HAL_GPIO_DeInit(GPIOB, GPIO_PIN_3|GPIO_PIN_4);
 
     /* USART2 DMA DeInit */
-    HAL_DMA_DeInit(huart->hdmarx);
     HAL_DMA_DeInit(huart->hdmatx);
+    HAL_DMA_DeInit(huart->hdmarx);
 
     /* USART2 interrupt DeInit */
     HAL_NVIC_DisableIRQ(USART2_IRQn);

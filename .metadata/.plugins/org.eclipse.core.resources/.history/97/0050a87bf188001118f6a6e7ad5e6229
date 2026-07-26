@@ -1,0 +1,4 @@
+../Core/Src/foc.c:35:6:CORDIC_Config	1
+../Core/Src/foc.c:159:6:SVPWM	7
+../Core/Src/foc.c:192:6:FOC_Init	1
+../Core/Src/foc.c:272:6:FOC_PWM_ISR	46

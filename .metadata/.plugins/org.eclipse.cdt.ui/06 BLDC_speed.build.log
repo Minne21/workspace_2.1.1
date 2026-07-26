@@ -1,10 +1,10 @@
-07:11:50 **** Incremental Build of configuration Debug for project 06 BLDC_speed ****
+08:19:13 **** Incremental Build of configuration Debug for project 06 BLDC_speed ****
 make -j16 all 
 arm-none-eabi-size  06\ BLDC_speed.elf 
    text	   data	    bss	    dec	    hex	filename
-  42252	     92	   4388	  46732	   b68c	06 BLDC_speed.elf
+  54736	    476	   4652	  59864	   e9d8	06 BLDC_speed.elf
 Finished building: default.size.stdout
  
 
-07:11:51 Build Finished. 0 errors, 0 warnings. (took 491ms)
+08:19:14 Build Finished. 0 errors, 0 warnings. (took 863ms)
 

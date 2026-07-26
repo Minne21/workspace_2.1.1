@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2026 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -23,9 +23,10 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 
-#include "serial.h"
+#include "foc.h"
 #include "sensor.h"
-
+#include "serial.h"
+//#include "uart_dma.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,6 +50,8 @@ ADC_HandleTypeDef hadc2;
 DMA_HandleTypeDef hdma_adc1;
 DMA_HandleTypeDef hdma_adc2;
 
+CORDIC_HandleTypeDef hcordic;
+
 OPAMP_HandleTypeDef hopamp1;
 OPAMP_HandleTypeDef hopamp2;
 OPAMP_HandleTypeDef hopamp3;
@@ -57,11 +60,11 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart2;
-DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
-extern AS5047_Enc_t 		motor_enc;	// Global instance tracking motor encoder state
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,6 +73,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_CORDIC_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_OPAMP1_Init(void);
 static void MX_OPAMP2_Init(void);
@@ -82,7 +86,54 @@ static void MX_TIM4_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// variables for system scheduler
+volatile uint32_t ms_counter = 0;
+volatile uint32_t tick_1ms = 0;
+volatile uint32_t tick_10ms = 0;
+volatile uint32_t tick_100ms = 0;
+volatile uint32_t tick_1s = 0;
 
+
+
+//void HAL_SYSTICK_Callback(void)
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim->Instance == TIM4)
+	{
+
+#if 0
+		// Set 1ms tick flag
+		tick_1ms = 1;
+		ms_counter++;
+
+	// Set 20ms tick flag
+		if (ms_counter % 50 == 0) {
+
+			tick_10ms = 1;
+		}
+
+		// Set 100ms tick flag
+		if (ms_counter % 100 == 0) {
+
+			tick_100ms = 1;
+		}
+
+		// Set 1s tick flag
+		if (ms_counter % 1000 == 0) {
+//			printf("%.3f \r\n", foc.mech_rad);
+//			UART_DMA_Printf("%.1fV, %.1f℃, %.3f, %.1f    ", Vbus, tempC, foc.mech_rad, foc.iq_ref);
+//			UART_DMA_Printf("%.3fA, %.3fA, %.3fA   \r\n", PhaseU_A, PhaseV_A, PhaseW_A);
+
+			tick_1s = 1;
+		}
+
+		// Reset counter after 1 second to avoid overflow
+		if (ms_counter >= 1000) {
+			ms_counter = 0;
+		}
+#endif
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -117,6 +168,7 @@ int main(void)
   MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
+  MX_CORDIC_Init();
   MX_ADC1_Init();
   MX_OPAMP1_Init();
   MX_OPAMP2_Init();
@@ -125,22 +177,13 @@ int main(void)
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
 
-  // Start everything first (ADC, OPAMP, etc.)
-  HAL_OPAMP_Start(&hopamp1);
-  HAL_OPAMP_Start(&hopamp2);
-  HAL_OPAMP_Start(&hopamp3);
+  /* Control init */
+  FOC_Init();			// must be before PWM start. Because starting PWM enables the interrupt (FOC_PWM_ISR) immediately, and that ISR uses foc variables that must already be initialized.
+  	  	  	  	  	  // FOC_Init(); is located after HAL_TIM_Base_Start_IT(&htim1);, iq_ref or maybe all paramters in the FOC_Init() are initialized to zero.
 
-  /* Calibration (Highly recommended for STM32G4) */
-  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-  HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED);
+  CORDIC_Config();
 
-  /* Start the ADCs in DMA Mode NEXT */
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC1_VAL, 4);
-  HAL_ADC_Start_DMA(&hadc2, (uint32_t *)ADC2_VAL, 2);
-
-  Calibrate_All_Offsets();
-
-  /* START TIMER1 */
+  /* 🔥 START TIMERS LAST */
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
@@ -148,25 +191,37 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3);
 
-  /* Start the channel using OC instead of PWM */
-  HAL_TIM_OC_Start(&htim1, TIM_CHANNEL_4);
+  HAL_TIM_Base_Start_IT(&htim1);				// for TIM15, TIM16
+  HAL_TIM_Encoder_Start_IT(&htim4, TIM_CHANNEL_ALL);
 
-  HAL_TIM_Base_Start_IT(&htim1);				// for TIM16
+  // Start everything first (ADC, OPAMP, etc.)
+  HAL_OPAMP_Start(&hopamp1);
+  HAL_OPAMP_Start(&hopamp2);
+  HAL_OPAMP_Start(&hopamp3);
+
+  /* Start ADC */
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC1_VAL, 4);
+  HAL_ADC_Start_DMA(&hadc2, (uint32_t *)ADC2_VAL, 2);
+
+  Calibrate_All_Offsets();
+
+//  AS5600_Init();
 
 
-  AS5047_Enc_Init(&motor_enc);
-
-  // Initialize your DMA UART framework
   UART_DMA_Init();
-  UART_DMA_Printf("Enter target RPM: ");
+  printf("UART ready\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // Continuously poll the buffer for user keyboard input
-	  UART_ProcessCommands();
+	// Toggle the PC6 LED pin
+//	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
+
+	// Delay for 1 seconds
+//	HAL_Delay(1000);
 
     /* USER CODE END WHILE */
 
@@ -191,12 +246,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV4;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV2;
   RCC_OscInitStruct.PLL.PLLN = 85;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
@@ -253,7 +307,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 4;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO2;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
@@ -349,7 +403,7 @@ static void MX_ADC2_Init(void)
   hadc2.Init.ContinuousConvMode = DISABLE;
   hadc2.Init.NbrOfConversion = 2;
   hadc2.Init.DiscontinuousConvMode = DISABLE;
-  hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO2;
+  hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO;
   hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc2.Init.DMAContinuousRequests = ENABLE;
   hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
@@ -387,6 +441,32 @@ static void MX_ADC2_Init(void)
 }
 
 /**
+  * @brief CORDIC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CORDIC_Init(void)
+{
+
+  /* USER CODE BEGIN CORDIC_Init 0 */
+
+  /* USER CODE END CORDIC_Init 0 */
+
+  /* USER CODE BEGIN CORDIC_Init 1 */
+
+  /* USER CODE END CORDIC_Init 1 */
+  hcordic.Instance = CORDIC;
+  if (HAL_CORDIC_Init(&hcordic) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CORDIC_Init 2 */
+
+  /* USER CODE END CORDIC_Init 2 */
+
+}
+
+/**
   * @brief OPAMP1 Initialization Function
   * @param None
   * @retval None
@@ -404,7 +484,7 @@ static void MX_OPAMP1_Init(void)
   hopamp1.Instance = OPAMP1;
   hopamp1.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
   hopamp1.Init.Mode = OPAMP_PGA_MODE;
-  hopamp1.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+  hopamp1.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO2;
   hopamp1.Init.InternalOutput = ENABLE;
   hopamp1.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
   hopamp1.Init.PgaConnect = OPAMP_PGA_CONNECT_INVERTINGINPUT_IO0_BIAS;
@@ -438,7 +518,7 @@ static void MX_OPAMP2_Init(void)
   hopamp2.Instance = OPAMP2;
   hopamp2.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
   hopamp2.Init.Mode = OPAMP_PGA_MODE;
-  hopamp2.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+  hopamp2.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO2;
   hopamp2.Init.InternalOutput = ENABLE;
   hopamp2.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
   hopamp2.Init.PgaConnect = OPAMP_PGA_CONNECT_INVERTINGINPUT_IO0_BIAS;
@@ -472,7 +552,7 @@ static void MX_OPAMP3_Init(void)
   hopamp3.Instance = OPAMP3;
   hopamp3.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
   hopamp3.Init.Mode = OPAMP_PGA_MODE;
-  hopamp3.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+  hopamp3.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO1;
   hopamp3.Init.InternalOutput = ENABLE;
   hopamp3.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
   hopamp3.Init.PgaConnect = OPAMP_PGA_CONNECT_INVERTINGINPUT_IO0_BIAS;
@@ -528,15 +608,15 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_OC4REF;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 3186;
+  sConfigOC.Pulse = 1062;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
@@ -551,13 +631,8 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.Pulse = 1062;
+  sConfigOC.Pulse = 0;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.Pulse = 3824;
-  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -608,12 +683,12 @@ static void MX_TIM4_Init(void)
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 65535;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 3;
+  sConfig.IC1Filter = 0;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
@@ -700,12 +775,12 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-  /* DMA1_Channel3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
   /* DMA1_Channel4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
@@ -728,14 +803,14 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(Status_LED_GPIO_Port, Status_LED_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : STATUS_LED_Pin */
-  GPIO_InitStruct.Pin = STATUS_LED_Pin;
+  /*Configure GPIO pin : Status_LED_Pin */
+  GPIO_InitStruct.Pin = Status_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(STATUS_LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(Status_LED_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
