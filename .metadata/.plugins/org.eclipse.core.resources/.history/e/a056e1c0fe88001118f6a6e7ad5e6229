@@ -95,12 +95,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 /****************************************/
 
 
-// Define the execution interval.
-// If your PWM/ADC loop runs at 20 kHz, 1ms equals 20 counts.
-#define ADC_1MS_COUNT 20
-
-uint16_t ADC1_VAL[4];		// [0] Vbus, [1] TempC, [2] PhaseU_A, [3] Potentiometer
-uint16_t ADC2_VAL[2];		// [0] PhaseV_A, [1] PhaseW_A
+uint16_t ADC1_VAL[5];		// [0] Vbus, [1] TempC, [2] PhaseU_A, [3] Potentiometer
+uint16_t ADC2_VAL[3];		// [0] PhaseV_A, [1] PhaseW_A
 
 float offset_phaseA = 0.0f;
 float offset_phaseB = 0.0f;
@@ -112,14 +108,11 @@ float PhaseU_A, PhaseV_A, PhaseW_A;
 // for interrupt
 volatile int isADCFinished = 0;
 
-
 // ADC IT for motor current sense, and votlage/temperature monitoring
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) __attribute__((section (".ccmram")));
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-    static uint16_t ms_counter = 0;
-
 	// Remove the Up/Down counting check.
 	// If TRGO is set to Update Event, this ISR only fires at the bottom of PWM.
 
@@ -129,14 +122,18 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
         // Using a single linear gain K_CURRENT. Standard B-G431-ESC1 gain is ~20.83
         PhaseU_A = ((float)ADC1_VAL[2] - offset_phaseA) * (VREF / 4096.0f) * K_CURRENT;
 
-        // 2. Housekeeping (Executed exactly every 1ms)
-        ms_counter++;
-        if (ms_counter >= ADC_1MS_COUNT) {
-            ms_counter = 0;     // Reset the 1ms counter
+        // 2. Housekeeping (Lower priority). Timer4 period is getting longer due to Vbus and TempC. it should be converted to isADCFinished.
+        NTC_GetTemperature();
+        Get_VBUS_Voltage();
+
+#ifdef movetoFOC
+        if (isADCFinished)
+        {
+            isADCFinished = 0;
             NTC_GetTemperature();
             Get_VBUS_Voltage();
         }
-
+#endif
     }
 
     if (hadc == &hadc2)

@@ -186,7 +186,7 @@ void SVPWM(float Valpha, float Vbeta)
 }
 
 
-#define VDQ_LIMIT   12.0f   // for 12V bus (50%)
+#define VDQ_LIMIT   6.0f   // for 12V bus (50%)
 AS5047_Enc_t motor_enc;
 
 void FOC_Init(void)
@@ -217,8 +217,8 @@ void FOC_Init(void)
     foc.speed_ref_rpm = 200.0f;   // 300 RPM target
     foc.speed_ref = foc.speed_ref_rpm * 0.10472f;  // RPM → rad/s
 
-    foc.pi_speed.kp = 0.05f;
-    foc.pi_speed.ki = 0.1f;
+    foc.pi_speed.kp = 0.1f;
+    foc.pi_speed.ki = 0.5f;
     foc.pi_speed.out_min = -3.0f;		// max negative torque current
     foc.pi_speed.out_max =  3.0f;
     foc.pi_speed.integrator = 0.0f;

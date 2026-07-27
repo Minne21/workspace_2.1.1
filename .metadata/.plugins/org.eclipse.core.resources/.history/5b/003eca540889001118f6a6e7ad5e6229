@@ -34,8 +34,8 @@ void AS5047_Enc_Index_Callback(AS5047_Enc_t *enc);
 
 
 /******************************************/
-extern uint16_t ADC1_VAL[4];
-extern uint16_t ADC2_VAL[2];
+extern uint16_t ADC1_VAL[5];
+extern uint16_t ADC2_VAL[3];
 
 extern float tempC, Vbus;
 extern float PhaseU_A, PhaseV_A, PhaseW_A;

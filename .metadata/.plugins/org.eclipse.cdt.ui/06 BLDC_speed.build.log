@@ -1,10 +1,17 @@
-08:19:13 **** Incremental Build of configuration Debug for project 06 BLDC_speed ****
+11:17:41 **** Incremental Build of configuration Debug for project 06 BLDC_speed ****
 make -j16 all 
+arm-none-eabi-gcc "../Core/Src/foc.c" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_HAL_DRIVER -DSTM32G431xx -c -I../Core/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -Ofast -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Core/Src/foc.d" -MT"Core/Src/foc.o" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "Core/Src/foc.o"
+arm-none-eabi-gcc -o "06 BLDC_speed.elf" @"objects.list"   -mcpu=cortex-m4 -T"C:\Users\polyn\STM32CubeIDE\workspace_2.1.1\06 BLDC_speed\STM32G431CBUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="06 BLDC_speed.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+Finished building target: 06 BLDC_speed.elf
+ 
 arm-none-eabi-size  06\ BLDC_speed.elf 
+arm-none-eabi-objdump -h -S 06\ BLDC_speed.elf  > "06 BLDC_speed.list"
    text	   data	    bss	    dec	    hex	filename
-  54736	    476	   4652	  59864	   e9d8	06 BLDC_speed.elf
+  54724	    476	   4644	  59844	   e9c4	06 BLDC_speed.elf
 Finished building: default.size.stdout
  
+Finished building: 06 BLDC_speed.list
+ 
 
-08:19:14 Build Finished. 0 errors, 0 warnings. (took 863ms)
+11:17:43 Build Finished. 0 errors, 0 warnings. (took 1s.845ms)
 

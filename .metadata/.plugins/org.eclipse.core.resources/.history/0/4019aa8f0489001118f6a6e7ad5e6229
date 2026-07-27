@@ -186,7 +186,7 @@ void SVPWM(float Valpha, float Vbeta)
 }
 
 
-#define VDQ_LIMIT   12.0f   // for 12V bus (50%)
+#define VDQ_LIMIT   6.0f   // for 12V bus (50%)
 AS5047_Enc_t motor_enc;
 
 void FOC_Init(void)
@@ -217,8 +217,8 @@ void FOC_Init(void)
     foc.speed_ref_rpm = 200.0f;   // 300 RPM target
     foc.speed_ref = foc.speed_ref_rpm * 0.10472f;  // RPM → rad/s
 
-    foc.pi_speed.kp = 0.05f;
-    foc.pi_speed.ki = 0.1f;
+    foc.pi_speed.kp = 0.1f;
+    foc.pi_speed.ki = 0.5f;
     foc.pi_speed.out_min = -3.0f;		// max negative torque current
     foc.pi_speed.out_max =  3.0f;
     foc.pi_speed.integrator = 0.0f;
@@ -314,8 +314,8 @@ void FOC_PWM_ISR(void)
 	    /* ---------- 3. Currents & Transformations ---------- */
 	    foc.ia = (alpha_current * PhaseU_A) + (1.0f - alpha_current) * foc.ia;
 	    foc.ib = (alpha_current * PhaseV_A) + (1.0f - alpha_current) * foc.ib;
-	    foc.ic = (alpha_current * PhaseW_A) + (1.0f - alpha_current) * foc.ic;		// wrong value, 0
-//	    foc.ic = -(foc.ia + foc.ib);
+//	    foc.ic = (alpha_current * PhaseW_A) + (1.0f - alpha_current) * foc.ic;		// wrong value, 0
+	    foc.ic = -(foc.ia + foc.ib);
 
 	    Clarke(foc.ia, foc.ib, foc.ic, &foc.ialpha, &foc.ibeta);
 	    // 정렬된 elec_rad를 사용하여 Park 변환 수행 -> iq가 DC로 나옴
@@ -336,8 +336,8 @@ void FOC_PWM_ISR(void)
 	    }
 
 	    // 오픈루프 테스트를 위한 값 설정
-//	    foc.vd = 0.0f;
-//	    foc.vq = 1.0f;
+	    foc.vd = 0.0f;
+	    foc.vq = 0.3f;
 
 	    InvPark(foc.vd, foc.vq, foc.elec_rad, &foc.valpha, &foc.vbeta);
 	    SVPWM(foc.valpha, foc.vbeta);
