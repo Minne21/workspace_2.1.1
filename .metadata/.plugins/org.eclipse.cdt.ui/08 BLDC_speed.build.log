@@ -1,0 +1,10 @@
+20:40:58 **** Incremental Build of configuration Debug for project 08 BLDC_speed ****
+make -j16 all 
+arm-none-eabi-size  08\ BLDC_speed.elf 
+   text	   data	    bss	    dec	    hex	filename
+  44860	     96	   4640	  49596	   c1bc	08 BLDC_speed.elf
+Finished building: default.size.stdout
+ 
+
+20:40:58 Build Finished. 0 errors, 0 warnings. (took 555ms)
+

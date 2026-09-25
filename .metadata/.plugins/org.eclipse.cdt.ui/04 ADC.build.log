@@ -1,10 +1,18 @@
-19:42:16 **** Build of configuration Debug for project 04 ADC ****
+19:44:51 **** Build of configuration Debug for project 04 ADC ****
 make -j16 all 
+arm-none-eabi-gcc "../Core/Src/main.c" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_HAL_DRIVER -DSTM32G431xx -c -I../Core/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Core/Src/main.d" -MT"Core/Src/main.o" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "Core/Src/main.o"
+arm-none-eabi-gcc "../Core/Src/sensor.c" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_HAL_DRIVER -DSTM32G431xx -c -I../Core/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Core/Src/sensor.d" -MT"Core/Src/sensor.o" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "Core/Src/sensor.o"
+arm-none-eabi-gcc -o "04 ADC.elf" @"objects.list"   -mcpu=cortex-m4 -T"C:\Users\polyn\STM32CubeIDE\workspace_2.1.1\04 ADC\STM32G431CBUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="04 ADC.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Finished building target: 04 ADC.elf
+ 
 arm-none-eabi-size  04\ ADC.elf 
+arm-none-eabi-objdump -h -S 04\ ADC.elf  > "04 ADC.list"
    text	   data	    bss	    dec	    hex	filename
   40976	     92	   4284	  45352	   b128	04 ADC.elf
 Finished building: default.size.stdout
  
+Finished building: 04 ADC.list
+ 
 
-19:42:17 Build Finished. 0 errors, 0 warnings. (took 978ms)
+19:44:54 Build Finished. 0 errors, 0 warnings. (took 3s.210ms)
 

@@ -1,0 +1,10 @@
+11:04:50 **** Incremental Build of configuration Debug for project 07 BLDC_current ****
+make -j16 all 
+arm-none-eabi-size  07\ BLDC_current.elf 
+   text	   data	    bss	    dec	    hex	filename
+  45544	     96	   4664	  50304	   c480	07 BLDC_current.elf
+Finished building: default.size.stdout
+ 
+
+11:04:51 Build Finished. 0 errors, 0 warnings. (took 505ms)
+

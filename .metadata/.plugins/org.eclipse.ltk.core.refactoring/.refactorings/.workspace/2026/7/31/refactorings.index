@@ -5,3 +5,20 @@
 1785070634487	Delete 6 resources
 1785070641414	Delete 9 resources
 1785071101252	Delete 2 resources
+1785280552687	Rename resource '06 BLDC_speed'
+1785280614671	Delete resource '06 BLDC_open/Debug'
+1785280621461	Delete resource '06 BLDC_open/Drivers'
+1785280625817	Delete resource '06 BLDC_open/Core'
+1785280641843	Delete 3 resources
+1785280692635	Delete resource '06 BLDC_open/06_BLDC_open_current Debug.launch'
+1785281003961	Delete resource '08 BLDC_speed/06 BLDC_speed.ioc'
+1785281015600	Delete resource '07 BLDC_current/06 BLDC_speed.ioc'
+1785281105694	Delete resource '07 BLDC_current/Core'
+1785281118099	Delete 5 resources
+1785281137540	Delete resource '07 BLDC_current/08_BLDC_close_current.launch'
+1785366969609	Delete resource '07 BLDC_current/09_BLDC_close_current_AS5047 Debug.launch'
+1785448828672	Delete resource '08 BLDC_speed/Core/Core'
+1785451626236	Rename resource '06 BLDC_open2'
+1785451646355	Delete resource '06 BLDC_open'
+1785451677019	Delete 2 resources
+1785451765300	Delete resource '06 BLDC_open3_ing/Core/Src/sensor.h'

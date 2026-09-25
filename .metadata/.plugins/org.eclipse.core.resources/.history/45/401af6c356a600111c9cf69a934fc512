@@ -1,0 +1,68 @@
+/*
+ * sensors.h
+ *
+ *  Created on: Nov 27, 2025
+ *      Author: Ray
+ */
+
+#ifndef INC_SENSOR_H_
+#define INC_SENSOR_H_
+
+#include "stm32g4xx_hal.h"
+
+
+/******************************************/
+
+#define ENCODER_RES         2048.0f
+#define SAMPLING_TIME_S     0.01f   // 10ms (제어 주기에 따라 수정)
+
+typedef struct {
+    int32_t  cnt;            // 현재 타이머 카운트
+    int32_t  last_cnt;       // 이전 타이머 카운트
+    int32_t  total_count;    // 누적 카운트
+
+    float    mech_rad;       // 기계적 각도 (0 ~ 6.283185f)
+    float    elec_rad;
+    float    velocity_rpm;   // 회전 속도 (RPM)
+
+    uint8_t  index_found;    // PB8 Index 감지 여부 플래그
+} AS5047_Enc_t;
+
+void AS5047_Enc_Init(AS5047_Enc_t *enc);
+void AS5047_Enc_Update(AS5047_Enc_t *enc);
+void AS5047_Enc_Index_Callback(AS5047_Enc_t *enc);
+
+
+/******************************************/
+extern uint16_t ADC1_VAL[4];
+extern uint16_t ADC2_VAL[2];
+
+extern float tempC, Vbus;
+extern float PhaseU_A, PhaseV_A, PhaseW_A;
+
+float NTC_GetTemperature(void);
+float Get_VBUS_Voltage(void);
+
+void FOC_CalibrateOffsets(void);
+
+void Calibrate_All_Offsets(void);
+
+//void AS5600_ReadAngle_DMA(void);
+
+
+/* API */
+void AS5600_Init(void);
+void AS5600_Update(void);
+uint16_t AS5600_GetRaw(void);
+void AS5600_CheckBus(void);
+
+
+
+extern volatile int isADCFinished;
+
+
+
+
+
+#endif /* INC_SENSOR_H_ */
+

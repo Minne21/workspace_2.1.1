@@ -1,0 +1,17 @@
+19:27:33 **** Incremental Build of configuration Debug for project 09 BLDC_position ****
+make -j16 all 
+arm-none-eabi-gcc "../Core/Src/foc.c" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_HAL_DRIVER -DSTM32G431xx -c -I../Core/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Core/Src/foc.d" -MT"Core/Src/foc.o" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "Core/Src/foc.o"
+arm-none-eabi-gcc -o "09 BLDC_position.elf" @"objects.list"   -mcpu=cortex-m4 -T"C:\Users\polyn\STM32CubeIDE\workspace_2.1.1\09 BLDC_position\STM32G431CBUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="09 BLDC_position.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Finished building target: 09 BLDC_position.elf
+ 
+arm-none-eabi-size  09\ BLDC_position.elf 
+arm-none-eabi-objdump -h -S 09\ BLDC_position.elf  > "09 BLDC_position.list"
+   text	   data	    bss	    dec	    hex	filename
+  45028	     96	   4648	  49772	   c26c	09 BLDC_position.elf
+Finished building: default.size.stdout
+ 
+Finished building: 09 BLDC_position.list
+ 
+
+19:27:38 Build Finished. 0 errors, 0 warnings. (took 5s.99ms)
+

@@ -1,0 +1,328 @@
+/*
+ * sensors.c
+ *
+ *  Created on: Nov 27, 2025
+ *      Author: Ray
+ */
+
+#include "main.h"
+#include <math.h>
+#include "stm32g4xx_hal.h"
+#include <stdint.h>
+
+//#include "as5600.h"
+#include "foc.h"
+#include "sensor.h"
+
+
+// ADC
+#define ADC_MAX       4095.0f     // 12-bit ADC
+#define VREF          3.3f
+
+// NTC
+#define R_FIXED       4700.0f     // 4.7k resistor
+#define R0            10000.0f    // NTC 10k at 25°C
+#define BETA          3435.0f
+#define T0            298.15f     // 25°C in Kelvin
+
+// Input voltage
+#define R_TOP          169000.0f  // R68 = 169k
+#define R_BOTTOM       18000.0f   // R76 = 18k
+#define VBUS_SCALE     ((R_TOP + R_BOTTOM) / R_BOTTOM)   // ~9.886
+
+// Current1,2,3
+#define R_SHUNT        0.003f
+#define GAIN_POS       64.0f
+#define GAIN_NEG      -63.0f
+
+#define K_CURRENT 		(1.0f / (GAIN_POS * R_SHUNT))	//20.833f		// K_CURRENT = 1 / (Rshunt x Gain) = 1/(0.003x16)
+
+
+/* =========================
+ * Configuration
+ * ========================= */
+#define AS5600_ADDR        (0x36 << 1)   // 7-bit address shifted for HAL
+#define AS5600_RAW_ANGLE   0x0C
+
+/* =========================
+ * Static variables
+ * ========================= */
+static uint8_t  i2c_rx_buff[2];
+static volatile uint16_t raw_angle_latest = 0;
+static volatile uint8_t  data_ready = 0;
+static volatile uint8_t  dma_busy = 0;
+
+/* =========================
+ * Internal helper
+ * ========================= */
+static void AS5600_Start_DMA(void)
+{
+    if (dma_busy) return;
+
+    if (HAL_I2C_GetState(&hi2c1) == HAL_I2C_STATE_READY)
+    {
+        dma_busy = 1;
+
+        HAL_I2C_Mem_Read_DMA(&hi2c1,
+                             AS5600_ADDR,
+                             AS5600_RAW_ANGLE,
+                             I2C_MEMADD_SIZE_8BIT,
+                             i2c_rx_buff,
+                             2);
+    }
+}
+
+/* =========================
+ * Public API
+ * ========================= */
+
+/**
+ * @brief Initialize AS5600 DMA reading
+ */
+void AS5600_Init(void)
+{
+    dma_busy = 0;
+    data_ready = 0;
+
+    AS5600_Start_DMA();
+}
+
+/**
+ * @brief Call inside 20kHz FOC ISR (very fast, safe)
+ */
+void AS5600_Update(void)
+{
+    if (data_ready)
+    {
+        uint16_t raw = raw_angle_latest & 0x0FFF;
+
+        foc.mech_rad = ((float)raw / 4096.0f) * TWO_PI;
+
+        data_ready = 0;
+    }
+
+    /* Ensure DMA keeps running */
+    AS5600_Start_DMA();
+}
+
+/**
+ * @brief Optional: get latest raw angle
+ */
+uint16_t AS5600_GetRaw(void)
+{
+    return raw_angle_latest;
+}
+
+/**
+ * @brief Optional: bus recovery (call in slow loop)
+ */
+void AS5600_CheckBus(void)
+{
+    if (HAL_I2C_GetError(&hi2c1) != HAL_I2C_ERROR_NONE)
+    {
+        HAL_I2C_DeInit(&hi2c1);
+        HAL_I2C_Init(&hi2c1);
+
+        dma_busy = 0;
+        AS5600_Start_DMA();
+    }
+}
+
+/* =========================
+ * HAL CALLBACKS
+ * ========================= */
+
+/**
+ * @brief DMA complete callback (CRITICAL SECTION)
+ */
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c == &hi2c1)
+    {
+        uint16_t raw = ((uint16_t)i2c_rx_buff[0] << 8) |
+                        (uint16_t)i2c_rx_buff[1];
+
+        raw_angle_latest = raw;
+        data_ready = 1;
+
+        dma_busy = 0;
+    }
+}
+
+/**
+ * @brief DMA error callback
+ */
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c == &hi2c1)
+    {
+        dma_busy = 0;
+    }
+}
+
+/****************************************/
+
+
+uint16_t ADC1_VAL[4];		// [0] Vbus, [1] TempC, [2] PhaseU_A, [3] Potentiometer
+uint16_t ADC2_VAL[2];		// [0] PhaseV_A, [1] PhaseW_A
+
+float offset_phaseA = 0.0f;
+float offset_phaseB = 0.0f;
+float offset_phaseC = 0.0f;
+
+float tempC, Vbus;
+float PhaseU_A, PhaseV_A, PhaseW_A;
+
+// for interrupt
+volatile int isADCFinished = 0;
+
+// ADC IT for motor current sense, and votlage/temperature monitoring
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) __attribute__((section (".ccmram")));
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+	// Remove the Up/Down counting check.
+	// If TRGO is set to Update Event, this ISR only fires at the bottom of PWM.
+
+    if(hadc == &hadc1)
+    {
+        // 1. Compute Phase A Current
+        // Using a single linear gain K_CURRENT. Standard B-G431-ESC1 gain is ~20.83
+        PhaseU_A = ((float)ADC1_VAL[2] - offset_phaseA) * (VREF / 4096.0f) * K_CURRENT;
+
+        // 2. Housekeeping (Lower priority). Timer4 period is getting longer due to Vbus and TempC. it should be converted to isADCFinished.
+        NTC_GetTemperature();
+        Get_VBUS_Voltage();
+
+    }
+
+    if (hadc == &hadc2)
+    {
+        // 3. Compute Phase B and C
+        PhaseV_A = ((float)ADC2_VAL[0] - offset_phaseB) * (VREF / 4096.0f) * K_CURRENT;
+        PhaseW_A = ((float)ADC2_VAL[1] - offset_phaseC) * (VREF / 4096.0f) * K_CURRENT;
+    }
+
+	isADCFinished = 1;
+
+
+
+#if reg
+	// hardware error clears torque enable register and disable FOC torque controller
+	if( regs[REG_HARDWARE_ERROR_STATUS] != 0 )
+	{
+		// disable motor control
+//		UART_DMA_Printf("%d \r\n", regs[REG_HARDWARE_ERROR_STATUS]);
+	}
+	else
+	{
+		API_FOC_Torque_Update();
+//		UART_DMA_Printf("ADC \r\n");
+	}
+#endif
+
+}
+
+void Calibrate_All_Offsets(void)
+{
+    uint32_t sumA = 0, sumB = 0, sumC = 0;
+    int samples = 1000;
+
+    for(int i = 0; i < samples; i++) {
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_Start(&hadc2);
+        HAL_ADC_PollForConversion(&hadc1, 10);
+        sumA += ADC1_VAL[2];
+        sumB += ADC2_VAL[0];
+        sumC += ADC2_VAL[1];
+    }
+    // Set global offsets as raw ADC counts (usually around 2048)
+    offset_phaseA = (float)sumA / samples;
+    offset_phaseB = (float)sumB / samples;
+    offset_phaseC = (float)sumC / samples;
+}
+
+
+
+// compute temperature in Celsius
+float NTC_GetTemperature(void)
+{
+	// Convert ADC to voltage
+    float V_NTC = (ADC1_VAL[1] / ADC_MAX) * VREF;
+
+    // Compute NTC resistance from divider equation
+    float R_NTC = (VREF / V_NTC - 1.0f) * R_FIXED;
+
+    // Temperature (Kelvin) using Beta equation
+    float tempK = 1.0f / ( (1.0f / T0) + (1.0f / BETA) * logf(R_NTC / R0) );
+//    float tempK = BETA * T0 / ( BETA - T0*logf(R0/r_ntc) );		//B-G431B-ESC1-v3
+
+    // Convert to Celsius
+    tempC = tempK - 273.15f;
+
+#if reg
+    // apply thermal protection and update hardware error register
+	float const max_temperature_C = regs[REG_TEMPERATURE_LIMIT];
+	if(NTC_tempC > max_temperature_C)
+	{
+		// set overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_OVERHEATING;
+		//HAL_Serial_Print(&serial,"h");
+	}
+	else if( ((regs[REG_HARDWARE_ERROR_STATUS]&(1UL << HW_ERROR_BIT_OVERHEATING))!=0) ) // hard-coded hysteresis 12°C
+	{
+		if(NTC_tempC < max_temperature_C-12.0f)
+			// clear overheating error
+			regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+		// wait for cooling
+	}
+	else
+	{
+		// clear overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+	}
+#endif
+
+    return tempC;
+}
+
+// compute input voltage
+float Get_VBUS_Voltage(void)
+{
+    uint16_t adc = ADC1_VAL[0];
+
+    // Convert ADC to voltage on VBUS_SENS pin
+    float v_adc = (adc / ADC_MAX) * VREF;
+
+    // Convert to actual input voltage
+    Vbus = v_adc * VBUS_SCALE;
+
+#if reg
+	// apply voltage protection and update
+	float const min_voltage_V = regs[REG_LOW_VOLTAGE_LIMIT];
+	float const max_voltage_V = regs[REG_HIGH_VOLTAGE_LIMIT];
+	if((Input_V > max_voltage_V)||(Input_V < min_voltage_V))
+	{
+		// set voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_VOLTAGE;
+		//HAL_Serial_Print(&serial,"v");
+	}
+	else
+	{
+		// clear voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_VOLTAGE);
+	}
+#endif
+
+    return Vbus;
+}
+
+
+
+
+
+
+
+
+
+

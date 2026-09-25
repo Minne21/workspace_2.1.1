@@ -2,7 +2,7 @@
  * sensors.c
  *
  * Created on: Nov 27, 2025
- * Author: Ray
+ * Author: Minne
  *
  * Description: Sensor processing module for an FOC motor controller.
  * Handles encoder tracking, 3-phase current sensing, and system health monitoring.

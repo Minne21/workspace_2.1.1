@@ -1,0 +1,128 @@
+/*
+ * foc.h
+ *
+ *  Created on: 2026. 1. 2.
+ *      Author: Minne
+ */
+
+#include <stdbool.h>
+
+#ifndef INC_FOC_H_
+#define INC_FOC_H_
+
+#define TIM_CLK_HZ  170000000UL						// APB2 timer clock is 170MHz
+#define PWM_FREQ_HZ 20000UL							// 20kHz
+#define Ts_current	(1.0f / PWM_FREQ_HZ)   				// sampling time 50 µs
+#define PWM_PERIOD  (TIM_CLK_HZ / (2 * PWM_FREQ_HZ))  	// 4250
+
+#define VDC         6.0f          	// It shouldn't be over 0.577x12V= 6.9V in the openloop control
+#define VQ_LIMIT 	(0.577f * VDC)	// if it is over, it is over-modulation.
+
+#define TWO_PI      6.28318530718f
+#define POLE_PAIRS 	14
+
+
+/* alignment */
+#define ALIGN_VOLT   (Vbus * 0.2f)   // try 20–30%
+#define ALIGN_TIME_S 0.5f            // at least 300–500 ms
+
+/* current limits */
+#define I_MAX         8.0f            // Amps (safe)
+
+/* ---------- Limits ---------- */
+#define IQ_REF_MAX_A      2.4f
+#define VMAX_DQ           6.75f
+#define SPEED_REF_MAX_RPM 1500.0f
+#define SPEED_REF_MAX_RAD (SPEED_REF_MAX_RPM * RPM_TO_RAD_S)
+
+#define RPM_TO_RAD_S   0.104720			//(TWO_PI / 60.0f)
+#define RAD_S_TO_RPM   9.549297			//(60.0f / TWO_PI)
+
+
+/* ---------------------------------------------------------------------------
+ * CORDIC scaling constant
+ *   q1.31: integer value (int32_t)2147483647 == +1.0
+ *   angle normalisation: θ_rad / π  →  [-1, +1)
+ * --------------------------------------------------------------------------- */
+#define Q31_SCALE     2147483648.0f     // 2^31
+#define ONE_OVER_PI   0.31830988618f    // 1/π  (multiply instead of divide)
+
+typedef struct
+{
+    float theta_est;
+    float omega_est;
+
+    float Kp;
+    float Ki;
+
+    float integrator;
+
+} PLL_Observer;
+
+/* PI structure */
+typedef struct {
+    float kp;
+    float ki;
+    float integrator;
+    float out_min;
+    float out_max;
+    float err;
+} PI_t;
+
+/* FOC state */
+typedef struct {
+    bool aligned;
+
+    float mech_offset;
+    float elec_offset;
+
+    float ia, ib, ic;
+    float ialpha, ibeta;
+    float id, iq;
+
+    float id_ref;
+    float iq_ref;
+
+    float vd, vq;
+    float valpha, vbeta;
+
+    uint8_t i2c_rx_buff[2];      // Buffer for AS5600 DMA
+    float mech_rad;
+    float elec_rad;
+
+    float align_timer;
+
+    PI_t pi_id;
+    PI_t pi_iq;
+
+    PI_t pi_speed;
+    PI_t pi_position;
+
+    float speed_ref;		// rad/s
+    float speed_ref_rpm;	// rpm
+    float omega;			// measured speed
+    float omega_rpm;
+
+    float omega_pll;
+    float omega_rpm_pll;
+
+    float position_ref;
+    float position_err;
+
+    uint8_t control_mode;	// 0: Current, 1: Speed, 2: Position
+} FOC_t;
+
+extern FOC_t foc;
+
+/* API */
+void FOC_Init(void);
+void FOC_PWM_ISR(void);
+void FOC_SlowTask(float iq_cmd);
+
+void SpinTestSafe(void);
+
+void CORDIC_Config(void);
+
+void FOC_PWM_ISR(void);
+
+#endif /* INC_FOC_H_ */

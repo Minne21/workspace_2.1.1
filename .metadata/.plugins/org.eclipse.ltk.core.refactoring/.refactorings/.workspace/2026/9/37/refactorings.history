@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Delete resource &apos;09 BLDC_position/08 BLDC_speed Debug.launch&apos;" deleteContents="false" description="Delete resource &apos;09 BLDC_position/08 BLDC_speed Debug.launch&apos;" element1="/09 BLDC_position/08 BLDC_speed Debug.launch" flags="7" id="org.eclipse.ltk.core.refactoring.delete.resources" resources="1" stamp="1788807105627"/>
+</session>

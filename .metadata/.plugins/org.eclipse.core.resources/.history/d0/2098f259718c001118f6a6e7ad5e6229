@@ -1,0 +1,352 @@
+/*
+ * sensors.c
+ *
+ * Created on: Nov 27, 2025
+ * Author: Ray
+ *
+ * Description: Sensor processing module for an FOC motor controller.
+ * Handles encoder tracking, 3-phase current sensing, and system health monitoring.
+ */
+
+#include "main.h"
+#include <math.h>
+#include "stm32g4xx_hal.h"
+#include <stdint.h>
+
+#include "foc.h"
+#include "sensor.h"
+#include "serial.h"
+
+/* ========================================================================== */
+/*                      HARDWARE & MATHEMATICAL DEFINITIONS                   */
+/* ========================================================================== */
+
+
+// Input voltage
+#define R_TOP       169000.0f  	// R68 = 169k
+#define R_BOTTOM    18000.0f   	// R76 = 18k
+#define VBUS_SCALE  ((R_TOP + R_BOTTOM) / R_BOTTOM)   // ~9.886
+
+#define K_CURRENT 	20.833f		// K_CURRENT 20.833f, GAIN_POS 16, R_SHUNT 3m
+								// K_CURRENT 10.417f, GAIN_POS 32, R_SHUNT 3m
+								// K_CURRENT 5.208f, GAIN_POS 64, R_SHUNT 3m
+
+/* ADC Configuration */
+#define ADC_MAX 	4095.0f 	// Maximum scale value for a 12-bit ADC
+#define VREF 		3.3f        // Microcontroller analog reference voltage (Volts)
+
+/* NTC Thermistor Parameters (Voltage Divider to Temperature) */
+#define R_FIXED 	4700.0f     // High-side bias resistor (4.7k Ohms)
+#define R0 			10000.0f    // Baseline NTC resistance at 25°C (10k Ohms)
+#define BETA 		3435.0f     // NTC Beta coefficient material constant
+#define T0 			298.15f     // 25°C baseline temperature converted to Kelvin
+
+/* DC Bus Voltage Monitor Resistor Divider Network */
+#define R_TOP 		169000.0f   // High-side sensing resistor (R68 = 169k Ohms)
+#define R_BOTTOM 	18000.0f   	// Low-side sensing resistor  (R76 = 18k Ohms)
+
+// Scale factor to map measured ADC voltage back to the actual VBUS voltage (~9.886)
+#define VBUS_SCALE ((R_TOP + R_BOTTOM) / R_BOTTOM)
+
+/* Current Shunt Amplifier Scaling Coefficients */
+#define K_CURRENT 	20.833f     // K_CURRENT 20.833f, GAIN_POS 16, R_SHUNT 3m
+                              	// K_CURRENT 10.417f, GAIN_POS 32, R_SHUNT 3m
+                              	// K_CURRENT 5.208f,  GAIN_POS 64, R_SHUNT 3m
+
+
+/* ========================================================================== */
+/*                         GLOBAL & EXTERNAL VARIABLES                        */
+/* ========================================================================== */
+
+extern TIM_HandleTypeDef 	htim4;      // Hardware timer configured for Encoder Mode
+extern AS5047_Enc_t 		motor_enc;	// Global instance tracking motor encoder state
+
+uint16_t ADC1_VAL[4];  		// DMA Target: [0] Vbus, [1] TempC, [2] PhaseU_A, [3] Potentiometer
+uint16_t ADC2_VAL[2];  		// DMA Target: [0] PhaseV_A, [1] PhaseW_A
+
+/* Zero-current operational offsets (Raw ADC counts, roughly ~2048) */
+float offset_phaseA = 0.0f;
+float offset_phaseB = 0.0f;
+float offset_phaseC = 0.0f;
+
+/* Parsed real-world telemetry parameters */
+float tempC, Vbus;
+float PhaseU_A, PhaseV_A, PhaseW_A;
+
+/* Interrupt coordination and house-keeping flag */
+volatile int isADCFinished = 0;
+
+
+
+/* ========================================================================== */
+/*                      AS5047 MAGNETIC ENCODER MODULE                        */
+/* ========================================================================== */
+
+/**
+ * @brief Initializes the AS5047 encoder hardware tracking via Timer 4.
+ * @param enc Pointer to the encoder tracking structure.
+ */
+void AS5047_Enc_Init(AS5047_Enc_t *enc) {
+    enc->index_found = 0;
+    enc->total_count = 0;
+    enc->mech_rad = 0.0f;
+
+    HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL); // Boot timer in quadrature mode
+    enc->last_cnt = __HAL_TIM_GET_COUNTER(&htim4);  // Save initial baseline count
+}
+
+/**
+ * @brief Aligns absolute zero position upon encountering the physical Index pulse.
+ *        Triggered inside the EXTI interrupt handler when mapping pin PB8 transitions.
+ * @param enc Pointer to the encoder tracking structure.
+ */
+void AS5047_Enc_Index_Callback(AS5047_Enc_t *enc) {
+    // On the first absolute physical zero cross, forcefully synchronize hardware timer registers
+    if (enc->index_found == 0) {
+        __HAL_TIM_SET_COUNTER(&htim4, 0);
+        enc->last_cnt = 0;
+        enc->index_found = 1;
+    }
+}
+
+
+/**
+ * @brief Periodic tracking update computing speed, mechanical angles, and electrical angles.
+ * @param enc Pointer to the encoder tracking structure.
+ */
+void AS5047_Enc_Update(AS5047_Enc_t *enc) {
+    enc->cnt = (int32_t)__HAL_TIM_GET_COUNTER(&htim4);
+
+    // 1. Compute delta change with casting to handle 16-bit timer overflow boundaries gracefully
+    int16_t diff = (int16_t)(enc->cnt - enc->last_cnt);
+    enc->total_count += diff;
+
+    // 2. Bound physical encoder steps to mechanical radians (0 to 2*PI)
+    float temp_rad = (float)(enc->cnt % (int)ENCODER_RES) * (2.0f * 3.14159265f / ENCODER_RES);
+    if (temp_rad < 0) temp_rad += (2.0f * 3.14159265f);
+    enc->mech_rad = temp_rad;
+
+    // 3. Compute electrical cycles based on physical pole pair configuration
+    enc->elec_rad = enc->mech_rad * POLE_PAIRS;
+
+    // Fast conditional loops to clip electrical angle back inside 0 to 2*PI boundary
+    while (enc->elec_rad < 0.0f)     enc->elec_rad += 6.2831853f;
+    while (enc->elec_rad >= 6.2831853f) enc->elec_rad -= 6.2831853f;
+
+    // 4. Transform step differential into structural mechanical shaft speed (RPM)
+    enc->velocity_rpm = ((float)diff / ENCODER_RES) * (60.0f / SAMPLING_TIME_S);
+    enc->last_cnt = enc->cnt;
+}
+
+
+/**
+ * @brief External Interrupt line routing callback provided by the STM32 HAL.
+ * @param GPIO_Pin The specific hardware pin generating the event signal.
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == GPIO_PIN_8) { // Explicitly target PB8 connected to the Encoder Z/Index track
+        AS5047_Enc_Index_Callback(&motor_enc);
+    }
+}
+
+
+
+/* ========================================================================== */
+/*                HIGH FREQUENCY MOTOR CONTROL INTERRUPT LOOP                 */
+/* ========================================================================== */
+
+/*
+ * CRITICAL PERFORMANCE OPTIMIZATION:
+ * Forces the entire ADC callback loop code sequence directly into Core Coupled Memory RAM (CCMRAM).
+ * This completely isolates execution path performance from Flash access wait-states.
+ */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) __attribute__((section (".ccmram")));
+
+/**
+ * @brief Main High Frequency ADC ISR called at completion of analog sensing configurations.
+ * @param hadc General pointer directly tracing the reporting ADC engine block.
+ */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+    // If TRGO is linked to the Timer Update Event, this handler executes cleanly at the bottom of the PWM wave.
+    if(hadc == &hadc1) {
+        // 1. Process Phase U current from Raw Bit Data to real Amperes
+        // Current = (Raw_Sample - Calibration_Zero_Offset) * Bit_Voltage_Step * Hardware_Amplifier_Scale
+        PhaseU_A = ((float)ADC1_VAL[2] - offset_phaseA) * (VREF / 4096.0f) * K_CURRENT;
+
+        // 2. Slow house-keeping processes.
+        // WARNING: logf calculations inside this high-frequency loop can heavily extend execution duration.
+        NTC_GetTemperature();
+        Get_VBUS_Voltage();
+
+#ifdef movetoFOC
+        // Intermittent low priority housekeeping framework bypass loop
+        if (isADCFinished) {
+            isADCFinished = 0;
+            NTC_GetTemperature();
+            Get_VBUS_Voltage();
+        }
+#endif
+    }
+
+    if (hadc == &hadc2) {
+        // 3. Process remaining Phase V and Phase W currents concurrently
+        PhaseV_A = ((float)ADC2_VAL[0] - offset_phaseB) * (VREF / 4096.0f) * K_CURRENT;
+        PhaseW_A = ((float)ADC2_VAL[1] - offset_phaseC) * (VREF / 4096.0f) * K_CURRENT;
+    }
+
+    isADCFinished = 1; // Assert execution tracking handshake flag
+
+
+#if reg
+	// hardware error clears torque enable register and disable FOC torque controller
+	if( regs[REG_HARDWARE_ERROR_STATUS] != 0 )
+	{
+		// disable motor control
+//		UART_DMA_Printf("%d \r\n", regs[REG_HARDWARE_ERROR_STATUS]);
+	}
+	else
+	{
+		API_FOC_Torque_Update();
+//		UART_DMA_Printf("ADC \r\n");
+	}
+#endif
+
+}
+
+/* ========================================================================== */
+/*                        CALIBRATION & TELEMETRY MODULE                      */
+/* ========================================================================== */
+
+void Calibrate_All_Offsets(void) {
+    uint32_t sumA = 0, sumB = 0, sumC = 0;
+    int samples = 100;
+
+    // 캘리브레이션 동안은 잠시 DMA를 멈추고 폴링 모드로 정확히 측정
+    HAL_ADC_Stop_DMA(&hadc1);
+    HAL_ADC_Stop_DMA(&hadc2);
+
+    for(int i = 0; i < samples; i++) {
+        // 1. 하드웨어에 소프트웨어 트리거로 변환 시작 명령
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_Start(&hadc2);
+
+        // 2. ADC 변환이 완전히 끝날 때까지 CPU가 안전하게 대기
+        if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK &&
+            HAL_ADC_PollForConversion(&hadc2, 100) == HAL_OK) {
+
+            // 3. 변환이 완료된 시점의 정확한 Raw 값 누적 (출력 레지스터 직접 조회)
+            sumA += HAL_ADC_GetValue(&hadc1); // 만약 ADC1에서 여러 채널을 쓴다면 적절한 랭크 확인 필요
+            sumB += HAL_ADC_GetValue(&hadc2); // (기존 버퍼 인덱스 기준 순서에 맞게 세팅)
+            // ※ 주의: HAL_ADC_GetValue는 한 번만 읽을 수 있으므로 다채널인 경우
+            // 순차적 폴링 또는 기존 DMA 버퍼가 확실히 갱신되도록 HAL_Delay(1); 로 대체 가능
+        }
+    }
+
+    // 4. 평균값 계산 (정지 상태이므로 12비트 기준 대략 2048 근처의 값이 나와야 정상)
+    offset_phaseA = (float)sumA / samples;
+    offset_phaseB = (float)sumB / samples;
+    offset_phaseC = (float)sumC / samples;
+
+    // 5. 오프셋 측정이 끝난 후, 실제 제어 루프를 위해 DMA 다시 시작
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC1_VAL, 4);
+    HAL_ADC_Start_DMA(&hadc2, (uint32_t *)ADC2_VAL, 2);
+}
+
+
+/**
+ * @brief Converts NTC voltage divider data to actual temperatures in Celsius
+ * .@return Computed board temperature in Celsius.
+*/
+float NTC_GetTemperature(void)
+{
+	// Convert ADC to voltage
+	// Map raw sampled bit information to actual analog voltage drop
+    float V_NTC = (ADC1_VAL[1] / ADC_MAX) * VREF;
+
+    // Rearrange voltage divider math to find real time ohm resistance profile
+    float R_NTC = (VREF / V_NTC - 1.0f) * R_FIXED;
+
+    // Evaluate absolute Kelvin scaling via Beta representation of Steinhart-Hart equation
+    float tempK = 1.0f / ( (1.0f / T0) + (1.0f / BETA) * logf(R_NTC / R0) );
+//    float tempK = BETA * T0 / ( BETA - T0*logf(R0/r_ntc) );		//B-G431B-ESC1-v3
+
+    // Scale Kelvin back down to human readable Celsius metrics
+    tempC = tempK - 273.15f;
+
+#if reg
+    /* Automatic Thermal Overload Fault Tripping Logic */
+    // apply thermal protection and update hardware error register
+	float const max_temperature_C = regs[REG_TEMPERATURE_LIMIT];
+	if(tempC > max_temperature_C)
+	{
+		// Trigger thermal hardware error flag state
+		// set overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_OVERHEATING;
+		//HAL_Serial_Print(&serial,"h");
+	}
+	else if( ((regs[REG_HARDWARE_ERROR_STATUS]&(1UL << HW_ERROR_BIT_OVERHEATING))!=0) ) // hard-coded hysteresis 12°C
+	{
+		// Hard-coded structural 12°C cooling hysteresis loop protection parameters
+		if(tempC < max_temperature_C-12.0f)
+			// clear overheating error
+			regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+		// wait for cooling
+	}
+	else
+	{
+		// clear overheating error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_OVERHEATING);
+	}
+#endif
+
+    return tempC;
+}
+
+
+
+/**
+ * @brief Samples analog hardware scale levels to calculate the primary DC power supply bus voltage.
+ * @return Evaluated main bus input voltage profile (Volts).
+ * */
+// compute input voltage
+float Get_VBUS_Voltage(void)
+{
+    uint16_t adc = ADC1_VAL[0];		// Map raw bit stream directly back into board monitoring trace voltage levels
+
+    // Convert ADC to voltage on VBUS_SENS pin
+    float v_adc = (adc / ADC_MAX) * VREF;	// Apply voltage divider ratio to derive the unscaled structural main power bus value
+
+    // Convert to actual input voltage
+    Vbus = v_adc * VBUS_SCALE;
+
+#if reg
+    /* Voltage Rails Under/Overbound Threshold Enforcement Controls */
+	// apply voltage protection and update
+	float const min_voltage_V = regs[REG_LOW_VOLTAGE_LIMIT];
+	float const max_voltage_V = regs[REG_HIGH_VOLTAGE_LIMIT];
+	if((Vbus > max_voltage_V)||(Vbus < min_voltage_V))
+	{
+		// Flag bus power structure instability errors
+		// set voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] |= 1UL << HW_ERROR_BIT_VOLTAGE;
+		//HAL_Serial_Print(&serial,"v");
+	}
+	else
+	{
+		// clear voltage error
+		regs[REG_HARDWARE_ERROR_STATUS] &= ~(1UL << HW_ERROR_BIT_VOLTAGE);
+	}
+#endif
+
+    return Vbus;
+}
+
+
+
+
+
+
+
+
+
+

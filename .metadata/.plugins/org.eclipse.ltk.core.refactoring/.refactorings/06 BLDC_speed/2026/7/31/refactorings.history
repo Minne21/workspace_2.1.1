@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<session version="1.0">
-<refactoring comment="Rename resource &apos;06 BLDC_speed/05 AS5047p.ioc&apos; to &apos;06 BLDC_speed.ioc&apos;" description="Rename resource &apos;05 AS5047p.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="05 AS5047p.ioc" name="06 BLDC_speed.ioc" stamp="1785067804958" updateReferences="true"/>
-</session>

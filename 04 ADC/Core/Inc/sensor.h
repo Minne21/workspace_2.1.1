@@ -2,7 +2,7 @@
  * sensors.h
  *
  *  Created on: Nov 27, 2025
- *      Author: Ray
+ *      Author: Minne
  */
 
 #ifndef INC_SENSOR_H_

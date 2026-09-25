@@ -1,0 +1,10 @@
+16:13:50 **** Incremental Build of configuration Debug for project 06 BLDC_open ****
+make -j16 all 
+arm-none-eabi-size  06\ BLDC_open.elf 
+   text	   data	    bss	    dec	    hex	filename
+  45560	     96	   4664	  50320	   c490	06 BLDC_open.elf
+Finished building: default.size.stdout
+ 
+
+16:13:51 Build Finished. 0 errors, 0 warnings. (took 746ms)
+

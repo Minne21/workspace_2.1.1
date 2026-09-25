@@ -1,0 +1,169 @@
+/*
+ * foc.c
+ *
+ *  Created on: Nov 29, 2025
+ *      Author: Ray
+ */
+
+#include <math.h>
+
+#include "stm32g4xx_hal.h"
+#include "stm32g4xx_hal_cordic.h"
+
+#include "foc.h"
+#include "sensor.h"
+
+
+FOC_t foc;
+
+float dutyA, dutyB, dutyC;
+float Va, Vb, Vc;
+
+float Vd_cmd = 0.0f;        // voltage magnitude during open-loop
+float Vq_cmd = 0.5f;   		// voltage magnitude during open-loop
+
+static inline void cordic_sincos(float theta, float *s, float *c) {
+    *s = sinf(theta);
+    *c = cosf(theta);
+}
+
+/* Inverse Park: dq -> alpha-beta */
+static void InvPark(float d, float q, float theta, float *alpha, float *beta)
+{
+    float s, c;
+    cordic_sincos(theta, &s, &c);
+    *alpha = d * c - q * s;
+    *beta  = d * s + q * c;
+}
+
+// --- SVPWM ---
+void SVPWM(float Valpha, float Vbeta)
+{
+    /* Inverse Clarke */
+    float Va = Valpha;
+    float Vb = -0.5f * Valpha + 0.8660254038f * Vbeta;
+    float Vc = -0.5f * Valpha - 0.8660254038f * Vbeta;
+
+    /* Zero-sequence injection */
+    float vmax = fmaxf(fmaxf(Va, Vb), Vc);
+    float vmin = fminf(fminf(Va, Vb), Vc);
+    float voffset = 0.5f * (vmax + vmin);
+
+    dutyA = 0.5f + (Va - voffset) / VDC; // VBUS_VOLTAGE;
+    dutyB = 0.5f + (Vb - voffset) / VDC; // VBUS_VOLTAGE;
+    dutyC = 0.5f + (Vc - voffset) / VDC; // VBUS_VOLTAGE;
+
+    // Limit
+    if (dutyA < 0) dutyA = 0; else if (dutyA > 1) dutyA = 1;
+    if (dutyB < 0) dutyB = 0; else if (dutyB > 1) dutyB = 1;
+    if (dutyC < 0) dutyC = 0; else if (dutyC > 1) dutyC = 1;
+
+    // PWM set ready
+    uint32_t period = TIM1->ARR;		// period is 4250
+
+    TIM1->CCR1 = dutyA * period;
+    TIM1->CCR2 = dutyB * period;
+    TIM1->CCR3 = dutyC * period;
+}
+
+
+#define OMEGA_TARGET   293.2f     // 300 RPM 440.6f, 100 RPM 146.6f omega = 2 pi * 100 / 60 = 10.47 rad/s, 10.47 * 14 = 146.6
+#define ACCEL_RATE     2000.0f    // rad/s^2 (gentle ramp)
+
+#define VQ_START       0.4f
+#define VQ_MAX         0.5f			// OMEGA_TARGET 1000.0f, VQ_MAX should be 1.2
+									// if VQ_MAX is low, motor is stud.
+#define SPEED_DIV 100   // 20 kHz / 20 = 1 kHz
+
+
+float mech_prev;
+float angle_raw;
+
+float mech_speed = 0.0f;      // rad/s
+float mech_rpm   = 0.0f;
+
+
+float dtheta= 0.0f;
+uint8_t speed_cnt = 0;
+
+
+float filtered_speed = 0.0f;
+
+float alpha = 0.001f; // Smoothing factor (0.0 to 1.0)
+
+void SpinTestSafe(void)
+{
+
+    static float omega_e = 0.0f;
+    static float theta_e = 0.0f;
+    static float Vq_cmd  = 0.0f;
+
+
+    /* -------- 1. open-loop drive -------- */
+    /* ramp electrical speed */
+
+    // 1. Build torque first
+    if (Vq_cmd < VQ_START)
+        Vq_cmd = VQ_START;
+
+    // 2. Ramp to target speed
+    if (omega_e < OMEGA_TARGET)
+    {
+        omega_e += ACCEL_RATE * Ts;
+        if (omega_e > OMEGA_TARGET)
+            omega_e = OMEGA_TARGET;
+    }
+    else
+    {
+        // 3. Hold constant speed
+        omega_e = OMEGA_TARGET;
+    }
+
+    // 4. Keep sufficient torque
+    if (Vq_cmd < VQ_MAX)
+        Vq_cmd += 0.5f * Ts;
+
+    // 5. Electrical angle update
+    theta_e += omega_e * Ts;
+    if (theta_e >= TWO_PI)
+        theta_e -= TWO_PI;
+
+    // 6. Generate voltage
+    float Valpha, Vbeta;
+    InvPark(0.0f, Vq_cmd, theta_e, &Valpha, &Vbeta);
+    SVPWM(Valpha, Vbeta);
+
+    speed_cnt++;
+
+    if (speed_cnt >= SPEED_DIV)
+    {
+        AS5600_Update();
+        angle_raw = foc.mech_rad;
+        dtheta = angle_raw - mech_prev;
+
+        // Unwrap
+        if (dtheta >  M_PI) dtheta -= TWO_PI;
+        if (dtheta < -M_PI) dtheta += TWO_PI;
+        mech_prev = angle_raw;
+
+        /* optional: reject reverse spike (open-loop only) */
+        if (dtheta < 0.0f)
+            dtheta = 0.0f;
+
+        // 1. Calculate raw speed
+        float raw_speed = dtheta / 0.005f;
+
+        // 2. Exponential Moving Average (EMA)
+        // Formula: Output = alpha * current + (1 - alpha) * previous
+        filtered_speed = (alpha * raw_speed) + ((1.0f - alpha) * filtered_speed);
+
+        // 3. Final Outputs
+        mech_speed = filtered_speed;
+        mech_rpm = mech_speed * 9.5493f;
+
+        speed_cnt = 0;
+    }
+}
+
+// in the speed loop 1kHz
+// AS5600_CheckBus();

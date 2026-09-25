@@ -1,8 +1,0 @@
-../Core/Src/sensor.c:43:6:AS5047_Enc_Init	16	static
-../Core/Src/sensor.c:53:6:AS5047_Enc_Index_Callback	16	static
-../Core/Src/sensor.c:62:6:AS5047_Enc_Update	24	static
-../Core/Src/sensor.c:88:6:HAL_GPIO_EXTI_Callback	16	static
-../Core/Src/sensor.c:114:6:HAL_ADC_ConvCpltCallback	16	static
-../Core/Src/sensor.c:228:6:Calibrate_All_Offsets	32	static
-../Core/Src/sensor.c:250:7:NTC_GetTemperature	24	static
-../Core/Src/sensor.c:292:7:Get_VBUS_Voltage	16	static

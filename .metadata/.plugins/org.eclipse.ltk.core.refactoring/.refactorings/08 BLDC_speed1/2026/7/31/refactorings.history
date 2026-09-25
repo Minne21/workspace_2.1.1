@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;08 BLDC_speed/06_BLDC_speed.ioc&apos; to &apos;08_BLDC_speed.ioc&apos;" description="Rename resource &apos;06_BLDC_speed.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="06_BLDC_speed.ioc" name="08_BLDC_speed.ioc" stamp="1785280993759" updateReferences="true"/>
+</session>
